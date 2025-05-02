@@ -51,11 +51,11 @@ io.on('connection', (socket) => {
     if (!room) return;
 
     if (room.host === socket.id) {
-      // Host verlässt → Raum schließen
+      // Nur hier wird der Raum aktiv geschlossen
       io.to(roomCode).emit('room-closed');
       io.in(roomCode).socketsLeave(roomCode);
       deleteRoom(roomCode);
-      console.log(`🔒 Raum ${roomCode} wurde geschlossen (Host ist gegangen)`);
+      console.log(`🔒 Raum ${roomCode} wurde bewusst geschlossen (Host hat verlassen)`);
     } else {
       removeViewer(roomCode, socket.id);
       socket.leave(roomCode);
@@ -70,12 +70,10 @@ io.on('connection', (socket) => {
     if (!roomCode) return;
 
     const room = getRoom(roomCode);
-
+    
     if (room?.host === socket.id) {
-      io.to(roomCode).emit('room-closed');
-      io.in(roomCode).socketsLeave(roomCode);
-      deleteRoom(roomCode);
-      console.log(`⚠️ Host hat die Verbindung verloren – Raum ${roomCode} geschlossen`);
+      // Host-Verbindung verloren – Raum bleibt bestehen!
+      console.log(`⚠️ Host ${socket.id} aus Raum ${roomCode} hat Verbindung verloren`);
     } else {
       removeViewer(roomCode, socket.id);
       socket.leave(roomCode);
