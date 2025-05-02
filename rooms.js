@@ -1,5 +1,3 @@
-// rooms.js
-
 const rooms = {};
 
 function generateRoomCode() {
@@ -30,13 +28,32 @@ function updateRoomState(code, state) {
   }
 }
 
-function getRoomViewers(code) {
-  return rooms[code]?.viewers || [];
+function getRoom(code) {
+  return rooms[code];
+}
+
+function getRoomCodeBySocketId(socketId) {
+  return Object.entries(rooms).find(
+    ([_, room]) => room.host === socketId || room.viewers.includes(socketId)
+  )?.[0];
+}
+
+function removeViewer(code, socketId) {
+  if (rooms[code]) {
+    rooms[code].viewers = rooms[code].viewers.filter(id => id !== socketId);
+  }
+}
+
+function deleteRoom(code) {
+  delete rooms[code];
 }
 
 module.exports = {
   createRoom,
   joinRoom,
   updateRoomState,
-  getRoomViewers
+  getRoom,
+  getRoomCodeBySocketId,
+  removeViewer,
+  deleteRoom
 };

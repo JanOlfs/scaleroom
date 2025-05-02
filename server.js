@@ -1,9 +1,16 @@
-// server.js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const { createRoom, joinRoom, updateRoomState, getRoomViewers } = require('./rooms');
+const {
+  createRoom,
+  joinRoom,
+  updateRoomState,
+  getRoom,
+  getRoomCodeBySocketId,
+  removeViewer,
+  deleteRoom
+} = require('./rooms');
 
 const app = express();
 const server = http.createServer(app);
@@ -39,9 +46,41 @@ io.on('connection', (socket) => {
     socket.to(roomCode).emit('game-state', gameState);
   });
 
+  socket.on('leave-room', (roomCode) => {
+    const room = getRoom(roomCode);
+    if (!room) return;
+
+    if (room.host === socket.id) {
+      // Host verlässt → Raum schließen
+      io.to(roomCode).emit('room-closed');
+      io.in(roomCode).socketsLeave(roomCode);
+      deleteRoom(roomCode);
+      console.log(`🔒 Raum ${roomCode} wurde geschlossen (Host ist gegangen)`);
+    } else {
+      removeViewer(roomCode, socket.id);
+      socket.leave(roomCode);
+      console.log(`👤 Zuschauer hat Raum ${roomCode} verlassen`);
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log(`❌ ${socket.id} disconnected`);
-    // Optional: remove from rooms
+
+    const roomCode = getRoomCodeBySocketId(socket.id);
+    if (!roomCode) return;
+
+    const room = getRoom(roomCode);
+
+    if (room?.host === socket.id) {
+      io.to(roomCode).emit('room-closed');
+      io.in(roomCode).socketsLeave(roomCode);
+      deleteRoom(roomCode);
+      console.log(`⚠️ Host hat die Verbindung verloren – Raum ${roomCode} geschlossen`);
+    } else {
+      removeViewer(roomCode, socket.id);
+      socket.leave(roomCode);
+      console.log(`👤 Zuschauer aus Raum ${roomCode} getrennt`);
+    }
   });
 });
 
