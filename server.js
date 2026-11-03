@@ -12,19 +12,24 @@ const {
   removeViewer,
   deleteRoom
 } = require('./rooms');
+const { handleFeedback } = require('./feedback');
 
 // Räume, deren Host so lange getrennt ist, werden aufgeräumt (Env überschreibbar,
 // v.a. für Tests). 15 Minuten decken App-Wechsel/kurze Funklöcher großzügig ab.
 const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS) || 15 * 60 * 1000;
 const SWEEP_INTERVAL_MS = Number(process.env.SWEEP_INTERVAL_MS) || 60 * 1000;
 
-// Kein Express nötig - es gibt keine HTTP-Routen außer dem Health-Check, und
+// Kein Express nötig - es gibt nur den Health-Check und /feedback, und
 // socket.io regelt CORS selbst. /healthz dient auch als Ziel für einen
 // Keep-Alive-Pinger gegen Render-Cold-Starts.
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && (req.url === '/healthz' || req.url === '/')) {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
+    return;
+  }
+  if (req.url === '/feedback') {
+    handleFeedback(req, res);
     return;
   }
   res.writeHead(404);
