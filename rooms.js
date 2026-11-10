@@ -1,16 +1,24 @@
 const crypto = require('crypto');
 
 const rooms = {};
+const CODE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+// Obergrenze für alle Räume zusammen: jeder hält seinen letzten Spielstand im Speicher
+const MAX_ROOMS = Number(process.env.MAX_ROOMS) || 500;
 
+const isFull = () => Object.keys(rooms).length >= MAX_ROOMS;
+
+// Immer genau 4 Zeichen (die App prüft das) und nicht vorhersagbar
 function generateRoomCode() {
   let code;
   do {
-    code = Math.random().toString(36).substring(2, 6).toUpperCase();
+    code = Array.from({ length: 4 }, () => CODE_CHARS[crypto.randomInt(CODE_CHARS.length)]).join('');
   } while (rooms[code]);
   return code;
 }
 
+/** Legt einen Raum an; null, wenn der Server voll ist. */
 function createRoom(hostId) {
+  if (isFull()) return null;
   const code = generateRoomCode();
   rooms[code] = {
     host: hostId,
@@ -36,14 +44,20 @@ function joinRoom(code, socketId) {
   return true;
 }
 
-function rejoinAsHost(code, hostToken, socketId) {
+/**
+ * Host kehrt zurück. Liefert 'rejoined', 'created' (Raum nach einem
+ * Server-Neustart neu angelegt) oder false. Mit allowCreate=false wird kein
+ * neuer Raum angelegt (der Aufrufer hat die Grenze für neue Räume erreicht).
+ */
+function rejoinAsHost(code, hostToken, socketId, allowCreate = true) {
   if (typeof hostToken !== 'string' || !hostToken) return false;
   // Server neu gestartet (Deploy, Render-Neustart): Räume lagen nur im Speicher.
   // Der Host bringt Code und Token mit, also den Raum unter demselben Code neu
   // anlegen; seinen Spielstand schickt er nach der Bestätigung selbst nach.
   if (!rooms[code] && /^[A-Z0-9]{4}$/.test(code)) {
+    if (!allowCreate || isFull()) return false;
     rooms[code] = { host: socketId, hostToken, hostDisconnectedAt: null, viewers: [], gameState: null };
-    return true;
+    return 'created';
   }
   const room = rooms[code];
   if (!room || room.hostToken !== hostToken) {
@@ -53,7 +67,7 @@ function rejoinAsHost(code, hostToken, socketId) {
   room.hostDisconnectedAt = null;
   // Falls der Host zwischenzeitlich als Viewer gejoint war, dort austragen
   room.viewers = room.viewers.filter(id => id !== socketId);
-  return true;
+  return 'rejoined';
 }
 
 function markHostDisconnected(code) {
@@ -97,6 +111,7 @@ function deleteRoom(code) {
 }
 
 module.exports = {
+  MAX_ROOMS,
   createRoom,
   joinRoom,
   rejoinAsHost,
