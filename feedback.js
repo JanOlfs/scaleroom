@@ -11,7 +11,10 @@ const MAX_IMAGES = 5;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024; // nach Base64-Dekodierung
 const MAX_DIAGNOSTICS_CHARS = 2 * 1024 * 1024;
 const RATE_LIMIT = 10; // Meldungen pro Stunde und IP
+// Obergrenze für alle zusammen: wechselnde IPs sollen nicht beliebig viele Issues anlegen können
+const GLOBAL_RATE_LIMIT = Number(process.env.FEEDBACK_GLOBAL_LIMIT) || 60;
 const recentByIp = new Map();
+let recentAll = [];
 
 const KINDS = { bug: { label: 'bug', title: 'Fehler' }, feature: { label: 'enhancement', title: 'Wunsch' } };
 
@@ -40,12 +43,30 @@ function readBody(req) {
   });
 }
 
-function rateLimited(ip) {
-  const hourAgo = Date.now() - 60 * 60 * 1000;
-  const recent = (recentByIp.get(ip) ?? []).filter((t) => t > hourAgo);
-  recent.push(Date.now());
+function rateLimited(ip, now = Date.now()) {
+  const hourAgo = now - 60 * 60 * 1000;
+  // Alte Einträge aller IPs verwerfen, sonst wächst die Map bis zum Neustart
+  for (const [key, times] of recentByIp) {
+    const fresh = times.filter((t) => t > hourAgo);
+    if (fresh.length) recentByIp.set(key, fresh);
+    else recentByIp.delete(key);
+  }
+  recentAll = recentAll.filter((t) => t > hourAgo);
+  const recent = recentByIp.get(ip) ?? [];
+  if (recent.length >= RATE_LIMIT || recentAll.length >= GLOBAL_RATE_LIMIT) return true;
+  recent.push(now);
   recentByIp.set(ip, recent);
-  return recent.length > RATE_LIMIT;
+  recentAll.push(now);
+  return false;
+}
+
+/**
+ * Absender-IP hinter dem Render-Proxy: der hängt die echte IP HINTEN an
+ * X-Forwarded-For an. Die Einträge davor kann der Absender selbst setzen.
+ */
+function clientIp(req) {
+  const forwarded = String(req.headers['x-forwarded-for'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  return forwarded.at(-1) ?? req.socket.remoteAddress ?? '';
 }
 
 const str = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
@@ -159,8 +180,7 @@ async function handleFeedback(req, res) {
   try {
     const token = process.env.GITHUB_TOKEN;
     if (!token) throw new FeedbackError(503, 'Feedback ist auf dem Server nicht eingerichtet.');
-    const ip = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress).split(',')[0].trim();
-    if (rateLimited(ip)) throw new FeedbackError(429, 'Zu viele Meldungen, bitte später nochmal.');
+    if (rateLimited(clientIp(req))) throw new FeedbackError(429, 'Zu viele Meldungen, bitte später nochmal.');
     const feedback = parseFeedback(await readBody(req));
     const issue = await createIssue(token, feedback);
     console.log(`📝 Feedback #${issue.number} angelegt`);
@@ -175,4 +195,4 @@ async function handleFeedback(req, res) {
   }
 }
 
-module.exports = { handleFeedback, parseFeedback, issueBody };
+module.exports = { handleFeedback, parseFeedback, issueBody, rateLimited, clientIp };

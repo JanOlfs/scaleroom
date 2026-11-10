@@ -37,8 +37,16 @@ function joinRoom(code, socketId) {
 }
 
 function rejoinAsHost(code, hostToken, socketId) {
+  if (typeof hostToken !== 'string' || !hostToken) return false;
+  // Server neu gestartet (Deploy, Render-Neustart): Räume lagen nur im Speicher.
+  // Der Host bringt Code und Token mit, also den Raum unter demselben Code neu
+  // anlegen; seinen Spielstand schickt er nach der Bestätigung selbst nach.
+  if (!rooms[code] && /^[A-Z0-9]{4}$/.test(code)) {
+    rooms[code] = { host: socketId, hostToken, hostDisconnectedAt: null, viewers: [], gameState: null };
+    return true;
+  }
   const room = rooms[code];
-  if (!room || !hostToken || room.hostToken !== hostToken) {
+  if (!room || room.hostToken !== hostToken) {
     return false;
   }
   room.host = socketId;
