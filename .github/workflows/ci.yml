@@ -1,0 +1,25 @@
+# Prüft jeden PR und jeden Push auf main. Render liefert main automatisch aus:
+# dort "Auto-Deploy: After CI Checks Pass" einstellen, dann geht nur Geprüftes live.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test

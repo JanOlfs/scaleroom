@@ -12,7 +12,8 @@ const {
   removeViewer,
   deleteRoom
 } = require('./rooms');
-const { handleFeedback } = require('./feedback');
+const { handleFeedback, clientIp } = require('./feedback');
+const { roomCreates, joinFailures } = require('./limits');
 
 // Räume, deren Host so lange getrennt ist, werden aufgeräumt (Env überschreibbar,
 // v.a. für Tests). 15 Minuten decken App-Wechsel/kurze Funklöcher großzügig ab.
@@ -37,8 +38,14 @@ const server = http.createServer((req, res) => {
 });
 
 const io = new Server(server, {
-  cors: { origin: '*' }
+  cors: { origin: '*' },
+  // Ein Spielstand hat wenige Kilobyte. Die Grenze hält übergroße Nachrichten
+  // fern, die sonst je Raum im Speicher liegen blieben (Standard wäre 1 MB).
+  maxHttpBufferSize: 256 * 1024
 });
+
+/** IP hinter dem Render-Proxy, wie beim Feedback (letzter X-Forwarded-For-Eintrag). */
+const ipOf = (socket) => clientIp({ headers: socket.handshake.headers, socket: { remoteAddress: socket.handshake.address } });
 
 // Ein einzelnes kaputtes Emit darf niemals den Prozess (und damit alle Räume)
 // umreißen - deshalb ist jeder Handler defensiv gekapselt.
@@ -57,7 +64,15 @@ io.on('connection', (socket) => {
 
   socket.on('create-room', safeHandler('create-room', (_, callback) => {
     if (typeof callback !== 'function') return;
-    const { code, hostToken } = createRoom(socket.id);
+    const ip = ipOf(socket);
+    // Zu viele Räume von dieser IP oder Server voll: ohne roomCode meldet die App "konnte nicht erstellt werden"
+    const created = roomCreates.blocked(ip) ? null : createRoom(socket.id);
+    if (!created) {
+      callback({ success: false, message: 'Too many rooms' });
+      return;
+    }
+    roomCreates.count(ip);
+    const { code, hostToken } = created;
     socket.join(code);
     console.log(`🎮 Room created: ${code}`);
     callback({ roomCode: code, hostToken });
@@ -65,7 +80,14 @@ io.on('connection', (socket) => {
 
   socket.on('join-room', safeHandler('join-room', (roomCode, callback) => {
     if (typeof callback !== 'function') return;
+    // Wer zu oft danebenliegt, probiert Codes durch: eine Weile gar nicht mehr antworten lassen
+    const ip = ipOf(socket);
+    if (joinFailures.blocked(ip)) {
+      callback({ success: false, message: 'Too many attempts' });
+      return;
+    }
     if (typeof roomCode !== 'string' || !joinRoom(roomCode, socket.id)) {
+      joinFailures.count(ip);
       callback({ success: false, message: 'Room not found' });
       return;
     }
@@ -85,10 +107,14 @@ io.on('connection', (socket) => {
   socket.on('rejoin-room', safeHandler('rejoin-room', (payload, callback) => {
     if (typeof callback !== 'function') return;
     const { roomCode, hostToken } = payload ?? {};
-    if (typeof roomCode !== 'string' || !rejoinAsHost(roomCode, hostToken, socket.id)) {
+    // Nach einem Server-Neustart legt der Rejoin den Raum neu an: zählt wie ein neuer Raum
+    const ip = ipOf(socket);
+    const result = typeof roomCode === 'string' && rejoinAsHost(roomCode, hostToken, socket.id, !roomCreates.blocked(ip));
+    if (!result) {
       callback({ success: false, message: 'Room not found or invalid token' });
       return;
     }
+    if (result === 'created') roomCreates.count(ip);
     socket.join(roomCode);
     console.log(`🔁 Host ${socket.id} rejoined ${roomCode}`);
     callback({ success: true });
@@ -155,9 +181,16 @@ setInterval(() => {
     deleteRoom(code);
     console.log(`🧹 Raum ${code} aufgeräumt (Host seit >${ROOM_TTL_MS / 1000}s getrennt)`);
   }
-}, SWEEP_INTERVAL_MS);
+  roomCreates.sweep();
+  joinFailures.sweep();
+}, SWEEP_INTERVAL_MS).unref();
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-});
+// Direkt gestartet (npm start, Render): lauschen. Tests laden die Datei und wählen selbst einen Port.
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  server.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+  });
+}
+
+module.exports = { server, io };
