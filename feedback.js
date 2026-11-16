@@ -16,7 +16,12 @@ const GLOBAL_RATE_LIMIT = Number(process.env.FEEDBACK_GLOBAL_LIMIT) || 60;
 const recentByIp = new Map();
 let recentAll = [];
 
-const KINDS = { bug: { label: 'bug', title: 'Fehler' }, feature: { label: 'enhancement', title: 'Wunsch' } };
+const KINDS = {
+  bug: { label: 'bug', title: 'Fehler' },
+  feature: { label: 'enhancement', title: 'Wunsch' },
+  // Bericht aus dem geführten Ablauf „Neue Waage einreichen“ (Mitschnitt in diagnose.json)
+  scale: { label: 'neue-waage', title: 'Neue Waage' },
+};
 
 class FeedbackError extends Error {
   constructor(status, message) {

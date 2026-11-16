@@ -147,6 +147,8 @@ test('Feedback: prüft Art, Text und Bilder und schneidet zu', () => {
   assert.strictEqual(status(JSON.stringify({ kind: 'bug', text: 'x', images: [big] })), 413);
   // mehr als 5 Bilder: die überzähligen fallen weg
   assert.strictEqual(parseFeedback(JSON.stringify({ kind: 'feature', text: 'x', images: Array(8).fill(png) })).images.length, 5);
+  // Bericht „Neue Waage“
+  assert.strictEqual(parseFeedback(JSON.stringify({ kind: 'scale', text: 'Neue Waage: X' })).kind, 'scale');
 });
 
 test('Feedback: der Issue-Text benachrichtigt niemanden und zerlegt die Tabelle nicht', () => {
